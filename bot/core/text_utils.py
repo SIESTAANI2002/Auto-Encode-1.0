@@ -11,18 +11,19 @@ from .func_utils import handle_logs
 from .reporter import rep
 
 CAPTION_FORMAT = """
-<b>㊂ <i>{title}</i></b>
+<blockquote><b>㊂ <i>{title}</i></b></blockquote>
 <b>╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅</b>
-<b>⊙</b> <i>Genres:</i> <i>{genres}</i>
-<b>⊙</b> <i>Status:</i> <i>RELEASING</i> 
-<b>⊙</b> <i>Source:</i> <i>Subsplease</i>
-<b>⊙</b> <i>Episode:</i> <i>{ep_no}</i>
-<b>⊙</b> <i>Audio: Japanese</i>
-<b>⊙</b> <i>Subtitle: English</i>
+<b>⊙ <i>Genres:</i></b> <i>{genres}</i>
+<b>⊙ <i>Status:</i></b> <i>RELEASING</i> 
+<b>⊙ <i>Source:</i></b> <i>Subsplease</i>
+<b>⊙ <i>Episode:</i></b> <i>{ep_no}</i>
+<b>⊙ <i>Audio: Japanese</i></b>
+<b>⊙ <i>Subtitle: English</i></b>
+<b>⊙ <i>Resolution: 720p</i></b>
 <b>╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅</b>
-╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅
-⌬  <b><i>Powered By</i></b> ~ </i></b><b><i>{cred}</i></b>
-╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅
+<blockquote>╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅
+⌬  <b><i>For More</i></b> ~ </i></b><b><i>AnimeToki.com</i></b>
+╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅</blockquote>
 """
 
 GENRES_EMOJI = {"Action": "👊", "Adventure": choice(['🪂', '🧗‍♀']), "Comedy": "🤣", "Drama": " 🎭", "Ecchi": choice(['💋', '🥵']), "Fantasy": choice(['🧞', '🧞‍♂', '🧞‍♀','🌗']), "Hentai": "🔞", "Horror": "☠", "Mahou Shoujo": "☯", "Mecha": "🤖", "Music": "🎸", "Mystery": "🔮", "Psychological": "♟", "Romance": "💞", "Sci-Fi": "🛸", "Slice of Life": choice(['☘','🍁']), "Sports": "⚽️", "Supernatural": "🫧", "Thriller": choice(['🥶', '🔪','🤯'])}
