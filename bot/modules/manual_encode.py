@@ -2,7 +2,6 @@ from pyrogram import filters
 from asyncio import Queue, Lock, create_task, sleep
 from time import time
 from os import path as ospath, remove
-from re import findall
 
 from bot import bot, Var, LOGS
 from bot.core.ffencoder import FFEncoder
@@ -58,12 +57,12 @@ async def queue_runner(client):
                         async with open(encoder._FFEncoder__prog_file, 'r') as f:
                             text = await f.read()
                         if text:
-                            t_done = findall(r"out_time_ms=(\d+)", text)
-                            time_done = int(t_done[-1])/1000000 if t_done else 1
+                            t_done = [int(x)/1000000 for x in findall(r"out_time_ms=(\d+)", text)]
+                            time_done = t_done[-1] if t_done else 1
                             total_time = encoder._FFEncoder__total_time or 1
                             percent = round(time_done/total_time*100,2)
                             if percent - last_percent >=5:
-                                # progress string similar to autoencode
+                                # progress string
                                 bar = "█" * int(percent//8) + "▒"*(12-int(percent//8))
                                 eta = (total_time - time_done)
                                 mins, secs = divmod(int(eta), 60)
