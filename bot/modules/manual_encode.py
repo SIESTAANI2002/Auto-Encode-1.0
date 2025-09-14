@@ -30,7 +30,6 @@ async def queue_runner(client):
 ‣ {convert_bytes(speed)}/s
 ‣ Time Left: {convert_time(eta)}"""
                 await editMessage(msg, progress_str)
-await encoder.message.download(encoder.dl_path, progress=download_progress)
                 
             encoder.start_download = time.time()
             await encoder.message.download(encoder.dl_path, progress=download_progress)
