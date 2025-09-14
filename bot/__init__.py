@@ -38,7 +38,8 @@ class Var:
     if not BOT_TOKEN or not API_HASH or not API_ID or not MONGO_URI:
         LOGS.critical('Important Variables Missing. Fill Up and Retry..!! Exiting Now...')
         exit(1)
-
+                
+    OWNER_ID = int(getenv("OWNER_ID", "123456789"))  # <-- Add your Telegram ID here
     RSS_ITEMS = getenv("RSS_ITEMS", "https://subsplease.org/rss/?r=1080").split()
     FSUB_CHATS = list(map(int, getenv('FSUB_CHATS').split()))
     BACKUP_CHANNEL = getenv("BACKUP_CHANNEL") or ""
