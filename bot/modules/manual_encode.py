@@ -7,7 +7,7 @@ from re import findall
 
 from bot.core.ffencoder import FFEncoder, convertBytes, convertTime
 from bot.core.func_utils import editMessage
-from bot.config import Var
+from bot import Var
 
 ffQueue = Queue()
 ffLock = Lock()
