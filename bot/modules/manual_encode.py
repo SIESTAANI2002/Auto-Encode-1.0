@@ -31,7 +31,6 @@ async def queue_runner(client):
 ‣ Time Left: {convert_time(eta)}"""
                 await editMessage(self.message, progress_str)
                 if (prog := findall(r"progress=(\w+)", text)) and prog[-1] == 'end':
-                    break
             await asleep(8)
                 
             encoder.start_download = time.time()
