@@ -65,7 +65,7 @@ async def queue_runner(client):
 @bot.on_message(filters.document | filters.video)
 async def manual_encode(client, message):
     global runner_task
-    if message.from_user.id not in Var.ADMINS:
+    if message.from_user.id not in Var.OWNER_ID:
         return await message.reply_text("❌ Only bot owner can use this bot.")
 
     file_name = message.document.file_name if message.document else message.video.file_name
