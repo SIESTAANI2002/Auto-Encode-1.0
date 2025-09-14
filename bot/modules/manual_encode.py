@@ -4,6 +4,7 @@ from bot import bot, Var, ffQueue, ffLock, ff_queued, LOGS
 from bot.core.ffencoder import FFEncoder
 from os import remove, path as ospath
 import sys, time
+import asyncio
 
 # -------------------- Queue & Lock -------------------- #
 runner_task = None
