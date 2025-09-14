@@ -26,7 +26,7 @@ async def queue_runner(client):
                 bar = "█"*int(percent/8) + "▒"*(12-int(percent/8))
                 speed = current / max(time.time() - encoder.start_download, 0.01)
                 eta = (total-current)/max(speed, 0.01)
-                text = f"""⬇️ Downloading {filename}
+                progress_str = f"""⬇️ Downloading {filename}
 <code>[{bar}]</code> {percent}%
 ‣ {convert_bytes(speed)}/s
 ‣ Time Left: {convert_time(eta)}"""
