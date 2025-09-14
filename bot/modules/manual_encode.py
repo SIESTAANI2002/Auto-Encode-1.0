@@ -1,107 +1,168 @@
-from re import findall
-from math import floor
-from time import time
-from os import path as ospath
-from aiofiles import open as aiopen
-from aiofiles.os import remove as aioremove, rename as aiorename
-from asyncio import sleep as asleep, gather, create_task, create_subprocess_shell
-from asyncio.subprocess import PIPE
+from pyrogram import filters
+from asyncio import Queue, Lock, create_task, sleep
+from os import path as ospath, remove
+from bot import bot, Var, LOGS
+from bot.core.ffencoder import FFEncoder
 
-from bot import Var, ffpids_cache, LOGS
-from bot.core.func_utils import mediainfo, convertBytes, convertTime, editMessage, sendMessage
-from bot.core.reporter import rep
-from bot.core.text_utils import TextEditor
+# -------------------- Queue & Lock -------------------- #
+ffQueue = Queue()        # waiting tasks
+ffLock = Lock()          # ensures only one encoder runs at a time
+ff_queued = {}           # currently running tasks {filename: encoder_instance}
+runner_task = None       # reference to the queue runner task
 
-ffargs = {
-    '1080': Var.FFCODE_1080,
-}
+# -------------------- Queue Runner -------------------- #
+async def queue_runner(client):
+    global runner_task
+    while not ffQueue.empty():
+        encoder = await ffQueue.get()
+        filename = ospath.basename(encoder.dl_path)
+        ff_queued[filename] = encoder  # mark as running
+        msg = encoder.msg
 
-class ManualEncoder:
-    def __init__(self, message, path, name, qual="1080"):
-        self.__proc = None
-        self.is_cancelled = False
-        self.message = message
-        self.__name = name
-        self.__qual = qual
-        self.dl_path = path
-        self.__total_time = None
-        self.out_path = ospath.join("encode", name)
-        self.__prog_file = "prog.txt"
-        self.__start_time = time()
+        try:
+            # Download
+            await msg.edit(f"⬇️ Downloading {filename}...")
+            await encoder.message.download(encoder.dl_path)
+            await msg.edit(f"⬇️ Download completed. Starting 1080p encoding...")
 
-    async def progress(self):
-        self.__total_time = await mediainfo(self.dl_path, get_duration=True)
-        if isinstance(self.__total_time, str):
-            self.__total_time = 1.0
-        while not (self.__proc is None or self.is_cancelled):
-            async with aiopen(self.__prog_file, "r+") as p:
-                text = await p.read()
-            if text:
-                time_done = floor(int(t[-1]) / 1000000) if (t := findall(r"out_time_ms=(\d+)", text)) else 1
-                ensize = int(s[-1]) if (s := findall(r"total_size=(\d+)", text)) else 0
+            # Encode with progress bar
+            encoder_task = create_task(encoder.start_encode())
+            last_percent = -5
+            progress_file = encoder._FFEncoder__prog_file
 
-                diff = time() - self.__start_time
-                speed = ensize / diff
-                percent = round((time_done / self.__total_time) * 100, 2)
-                tsize = ensize / (max(percent, 0.01) / 100)
-                eta = (tsize - ensize) / max(speed, 0.01)
+            while not encoder_task.done():
+                if ospath.exists(progress_file):
+                    try:
+                        with open(progress_file, "r") as f:
+                            text = f.read()
+                            if (t := re.findall(r"out_time_ms=(\d+)", text)):
+                                time_done = int(t[-1]) / 1000000
+                                total = encoder._FFEncoder__total_time or 1
+                                percent = min(round(time_done / total * 100, 2), 100)
 
-                bar = floor(percent / 8) * "█" + (12 - floor(percent / 8)) * "▒"
+                                # Calculate ETA
+                                ensize = int(s[-1]) if (s := re.findall(r"total_size=(\d+)", text)) else 0
+                                diff = time() - encoder._FFEncoder__start_time
+                                speed = ensize / max(diff, 1)
+                                tsize = ensize / max(percent / 100, 0.01)
+                                eta = (tsize - ensize) / max(speed, 0.01)
+                                mins, secs = divmod(int(eta), 60)
+                                eta_str = f"{mins}m {secs}s"
 
-                progress_str = f"""<blockquote>‣ <b>Anime Name :</b> <b><i>{self.__name}</i></b></blockquote>
-<blockquote>‣ <b>Status :</b> <i>Encoding</i>
-    <code>[{bar}]</code> {percent}%</blockquote> 
-<blockquote>   ‣ <b>Size :</b> {convertBytes(ensize)} out of ~ {convertBytes(tsize)}
-    ‣ <b>Speed :</b> {convertBytes(speed)}/s
-    ‣ <b>Time Took :</b> {convertTime(diff)}
-    ‣ <b>Time Left :</b> {convertTime(eta)}</blockquote>
-<blockquote>‣ <b>File(s) Encoded:</b> <code>1 / 1</code></blockquote>"""
+                                if percent - last_percent >= 5:
+                                    bar = "█" * int(percent // 8) + "▒" * (12 - int(percent // 8))
+                                    progress_str = f"""‣ Anime Name : {filename}
+‣ Status : Encoding
+    [{bar}] {percent}%
+‣ Size : {encoder.convertBytes(ensize)} out of ~ {encoder.convertBytes(tsize)}
+‣ Speed : {encoder.convertBytes(speed)}/s
+‣ Time Took : {encoder.convertTime(diff)}
+‣ Time Left : {eta_str}
+‣ File(s) Encoded: 0 / 1"""
+                                    await msg.edit(progress_str)
+                                    last_percent = percent
+                    except Exception as e:
+                        LOGS.error(f"Progress read error: {str(e)}")
+                await sleep(10)
 
-                await editMessage(self.message, progress_str)
-                if (prog := findall(r"progress=(\w+)", text)) and prog[-1] == "end":
-                    break
-            await asleep(10)
+            # Get output
+            output_path = await encoder_task
 
-    async def start_encode(self):
-        if ospath.exists(self.__prog_file):
-            await aioremove(self.__prog_file)
+            # Upload
+            await client.send_document(
+                chat_id=Var.MAIN_CHANNEL,
+                document=output_path,
+                caption=f"✅ Encoded 1080p: {filename}"
+            )
+            await msg.edit(f"✅ Encoding and upload finished: {filename}")
 
-        async with aiopen(self.__prog_file, "w+"):
-            LOGS.info("Progress Temp Generated !")
+            # Auto-delete original & encoded if enabled
+            if Var.AUTO_DEL:
+                for f in [encoder.dl_path, output_path]:
+                    if ospath.exists(f):
+                        remove(f)
 
-        dl_npath, out_npath = ospath.join("encode", "ffanimeadvin.mkv"), ospath.join("encode", "ffanimeadvout.mkv")
-        await aiorename(self.dl_path, dl_npath)
+        except Exception as e:
+            LOGS.error(f"Queue task failed: {filename} | {str(e)}")
+            await msg.edit(f"❌ Task failed: {filename}")
 
-        ffcode = ffargs[self.__qual].format(dl_npath, self.__prog_file, out_npath)
+        finally:
+            ff_queued.pop(filename, None)
+            ffQueue.task_done()
 
-        LOGS.info(f"FFCode: {ffcode}")
-        self.__proc = await create_subprocess_shell(ffcode, stdout=PIPE, stderr=PIPE)
-        proc_pid = self.__proc.pid
-        ffpids_cache.append(proc_pid)
-        _, return_code = await gather(create_task(self.progress()), self.__proc.wait())
-        ffpids_cache.remove(proc_pid)
+    runner_task = None
 
-        await aiorename(dl_npath, self.dl_path)
+# -------------------- Manual Encode Handler -------------------- #
+@bot.on_message(filters.document | filters.video)
+async def manual_encode(client, message):
+    global runner_task
+    # Only owner
+    if message.from_user.id != Var.OWNER_ID:
+        return await message.reply_text("❌ You are not allowed to use this bot.")
 
-        if self.is_cancelled:
-            return
+    file_name = message.document.file_name if message.document else message.video.file_name
+    download_path = f"downloads/{file_name}"
 
-        if return_code == 0:
-            if ospath.exists(out_npath):
-                # rename using TextEditor like auto-encode
-                editor = TextEditor(self.__name)
-                await editor.load_anilist()
-                upname = await editor.get_upname(self.__qual)
-                final_out = ospath.join("encode", upname)
-                await aiorename(out_npath, final_out)
-                return final_out
+    msg = await message.reply_text(f"⏳ Queued: {file_name}")
+
+    encoder = FFEncoder(message, download_path, file_name, "1080")
+    encoder.msg = msg
+
+    await ffQueue.put(encoder)
+    LOGS.info(f"Added {file_name} to queue")
+
+    if runner_task is None or runner_task.done():
+        runner_task = create_task(queue_runner(client))
+
+# -------------------- Queue Status Command -------------------- #
+@bot.on_message(filters.command("queue"))
+async def queue_status(client, message):
+    status_lines = []
+
+    for fname, encoder in ff_queued.items():
+        status_lines.append(f"▶️ Encoding: {fname}")
+
+    if not ffQueue.empty():
+        for encoder in list(ffQueue._queue):
+            filename = ospath.basename(encoder.dl_path)
+            status_lines.append(f"⏳ Waiting: {filename}")
+
+    if not status_lines:
+        await message.reply_text("📭 No files are currently queued.")
+    else:
+        await message.reply_text("\n".join(status_lines))
+
+# -------------------- Cancel Command -------------------- #
+@bot.on_message(filters.command("cancel"))
+async def cancel_encode(client, message):
+    try:
+        filename = message.text.split(maxsplit=1)[1]
+    except IndexError:
+        return await message.reply_text("⚠️ Usage: /cancel <filename>")
+
+    removed = False
+
+    if filename in ff_queued:
+        encoder = ff_queued[filename]
+        encoder.is_cancelled = True
+        removed = True
+        return await message.reply_text(f"🛑 Cancel request sent for {filename}")
+
+    temp_queue = []
+    while not ffQueue.empty():
+        encoder = await ffQueue.get()
+        if ospath.basename(encoder.dl_path) == filename:
+            removed = True
+            LOGS.info(f"Removed {filename} from waiting queue")
+            ffQueue.task_done()
         else:
-            await rep.report((await self.__proc.stderr.read()).decode().strip(), "error")
+            temp_queue.append(encoder)
+            ffQueue.task_done()
 
-    async def cancel_encode(self):
-        self.is_cancelled = True
-        if self.__proc is not None:
-            try:
-                self.__proc.kill()
-            except:
-                pass
+    for e in temp_queue:
+        await ffQueue.put(e)
+
+    if removed:
+        await message.reply_text(f"🗑️ {filename} removed from queue.")
+    else:
+        await message.reply_text(f"❌ File {filename} not found in queue.")
