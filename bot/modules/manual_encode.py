@@ -1,10 +1,12 @@
+import os
+import sys
+from time import time, sleep
+from math import floor
 from pyrogram import Client, filters
-from asyncio import Queue, Lock, create_task, sleep
+from asyncio import Queue, Lock, create_task
 from bot.core.ffencoder import FFEncoder
 from bot.core.func_utils import convertBytes, convertTime, editMessage
 from bot import Var, LOGS
-import os
-import sys
 
 # -------------------- Queue & Lock -------------------- #
 ffQueue = Queue()
