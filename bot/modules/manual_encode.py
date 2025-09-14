@@ -1,121 +1,129 @@
-import os, aiohttp, aiofiles, asyncio, libtorrent as lt
-from time import time
+import asyncio, os, re, aiohttp, libtorrent as lt, shutil
 from math import floor
-from urllib.parse import urlparse
-from pyrogram import Client, filters
+from time import time
+from aiofiles import open as aiopen
+from aiofiles.os import rename as aiorename, remove as aioremove
 from bot.core.ffencoder import FFEncoder
-from bot.core.func_utils import convertBytes, convertTime, editMessage
-from bot import Var
+from bot.core.func_utils import convertBytes, convertTime, editMessage, sendMessage
+from bot.config import Var
+from pyrogram import Client, filters
+from pyrogram.types import Message
 
-bot = Client("manual_encode_bot", api_id=Var.API_ID, api_hash=Var.API_HASH, bot_token=Var.BOT_TOKEN)
+bot = Client("AutoBot", api_id=Var.API_ID, api_hash=Var.API_HASH, bot_token=Var.BOT_TOKEN)
 
-OWNER_ID = Var.OWNER_ID  # Make sure this is set in config
+# -------------------- DOWNLOAD HELPERS -------------------- #
 
-# ----------------------------
-# /restart command
-# ----------------------------
-@bot.on_message(filters.command("restart") & filters.user(OWNER_ID))
-async def restart_bot(_, message):
-    await message.reply("🔄 Restarting bot...")
-    os.execv(__file__, ["python3"] + [__file__])
-
-# ----------------------------
-# Download helper
-# ----------------------------
-async def download_url_or_torrent(message, url):
-    filename = os.path.basename(urlparse(url).path) if not url.startswith("magnet:") else "magnet_download"
-    path = f"downloads/{filename}"
-    prog_msg = await message.reply(f"⬇️ Downloading {filename}...")
-
-    if url.startswith("magnet:") or url.endswith(".torrent"):
-        # Torrent download
-        ses = lt.session()
-        ses.listen_on(6881, 6891)
-        params = {"save_path": "downloads/", "storage_mode": lt.storage_mode_t.storage_mode_sparse}
-
-        if url.startswith("magnet:"):
-            handle = lt.add_magnet_uri(ses, url, params)
-            while not handle.has_metadata():
-                await asyncio.sleep(1)
-        else:
-            info = lt.torrent_info(url)
-            handle = ses.add_torrent({"ti": info, "save_path": "downloads/"})
-
-        start_time = time()
-        while not handle.is_seed():
-            s = handle.status()
-            current, total = s.total_done, s.total_wanted
-            speed = s.download_rate
-            percent = round(current / max(total,1)*100,2)
-            bar = floor(percent/8)*"█" + (12-floor(percent/8))*"▒"
-            eta = (total - current)/max(speed,1)
-            await editMessage(prog_msg, f"""⬇️ Downloading {filename}
-[{bar}] {percent}%
-Size: {convertBytes(current)}/{convertBytes(total)}
-Speed: {convertBytes(speed)}/s
-ETA: {convertTime(eta)}""")
+async def download_telegram_file(message: Message, out_path: str):
+    start_time = time()
+    downloaded = 0
+    total = message.document.file_size if message.document else message.video.file_size
+    async with aiopen(out_path, 'wb') as f:
+        async for chunk in message.download(in_memory=True, chunk_size=1024*1024):
+            await f.write(chunk)
+            downloaded += len(chunk)
+            percent = downloaded/total*100
+            speed = downloaded/(time()-start_time)
+            eta = (total-downloaded)/max(speed,0.01)
+            bar = floor(percent/8)*"█" + (12 - floor(percent/8))*"▒"
+            progress_str = f"""⬇️ <b>Downloading:</b> {message.document.file_name if message.document else message.video.file_name}
+<code>[{bar}]</code> {percent:.2f}%
+Speed: {convertBytes(speed)}/s | ETA: {convertTime(eta)}"""
+            await editMessage(message, progress_str)
             await asyncio.sleep(10)
-    else:
-        # Direct link
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                total = int(resp.headers.get("Content-Length",0))
-                downloaded = 0
-                start_time = time()
-                async with aiofiles.open(path, "wb") as f:
-                    async for chunk in resp.content.iter_chunked(1024*64):
-                        await f.write(chunk)
-                        downloaded += len(chunk)
-                        percent = round(downloaded / max(total,1) * 100, 2)
-                        speed = downloaded / max(time() - start_time,1)
-                        eta = (total - downloaded)/max(speed,1)
-                        bar = floor(percent/8)*"█" + (12-floor(percent/8))*"▒"
-                        await editMessage(prog_msg, f"""⬇️ Downloading {filename}
-[{bar}] {percent}%
-Size: {convertBytes(downloaded)}/{convertBytes(total)}
-Speed: {convertBytes(speed)}/s
-ETA: {convertTime(eta)}""")
+    return out_path
+
+async def download_url_file(url: str, out_path: str, message: Message=None):
+    start_time = time()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            total = int(resp.headers.get('content-length', 0))
+            downloaded = 0
+            async with aiopen(out_path, 'wb') as f:
+                async for chunk in resp.content.iter_chunked(1024*1024):
+                    await f.write(chunk)
+                    downloaded += len(chunk)
+                    if message:
+                        percent = downloaded/total*100 if total else 0
+                        speed = downloaded/(time()-start_time)
+                        eta = (total-downloaded)/max(speed,0.01) if total else 0
+                        bar = floor(percent/8)*"█" + (12 - floor(percent/8))*"▒"
+                        progress_str = f"""⬇️ <b>Downloading:</b> {os.path.basename(out_path)}
+<code>[{bar}]</code> {percent:.2f}%
+Speed: {convertBytes(speed)}/s | ETA: {convertTime(eta)}"""
+                        await editMessage(message, progress_str)
                         await asyncio.sleep(10)
+    return out_path
 
-    await prog_msg.edit(f"⬇️ Download Completed: {filename}")
-    return path, filename
+async def download_magnet(magnet: str, out_path: str, message: Message=None):
+    ses = lt.session()
+    ses.listen_on(6881, 6891)
+    params = {'save_path': os.path.dirname(out_path)}
+    handle = lt.add_magnet_uri(ses, magnet, params)
+    while not handle.has_metadata():
+        await asyncio.sleep(1)
+    info = handle.get_torrent_info()
+    fname = info.files()[0].path
+    total = info.total_size()
+    start_time = time()
+    while handle.status().state != lt.torrent_status.seeding:
+        s = handle.status()
+        percent = s.progress * 100
+        speed = s.download_rate
+        eta = (total - s.total_done)/max(speed,1)
+        bar = floor(percent/8)*"█" + (12 - floor(percent/8))*"▒"
+        if message:
+            progress_str = f"""⬇️ <b>Downloading:</b> {fname}
+<code>[{bar}]</code> {percent:.2f}%
+Speed: {convertBytes(speed)}/s | ETA: {convertTime(eta)}"""
+            await editMessage(message, progress_str)
+        await asyncio.sleep(10)
+    # Move file to out_path
+    src = os.path.join(os.path.dirname(out_path), fname)
+    shutil.move(src, out_path)
+    return out_path
 
-# ----------------------------
-# Manual encode command
-# ----------------------------
-@bot.on_message(filters.command("encode") & filters.user(OWNER_ID))
-async def manual_encode(_, message):
-    if not message.reply_to_message:
-        return await message.reply("❌ Reply to a file or send a direct/magnet/torrent link.")
+# -------------------- COMMAND HANDLERS -------------------- #
 
-    # Determine source
-    if message.reply_to_message.document:
-        file = await message.reply_to_message.download()
-        filename = message.reply_to_message.document.file_name
+@bot.on_message(filters.command("manual") & filters.user(Var.OWNER_ID))
+async def manual_encode_handler(client, message):
+    text = message.text.split(maxsplit=1)
+    if len(text) < 2:
+        await sendMessage(message, "Send a file, magnet or URL after /manual")
+        return
+    link_or_file = text[1]
+    filename = None
+
+    # Determine type
+    if message.document or message.video:
+        filename = f"./downloads/{message.document.file_name if message.document else message.video.file_name}"
+        await download_telegram_file(message, filename)
+    elif link_or_file.startswith("magnet:"):
+        filename = f"./downloads/{link_or_file.split('dn=')[-1].split('&')[0]}.mkv"
+        await download_magnet(link_or_file, filename, message)
+    elif link_or_file.startswith("http"):
+        filename = f"./downloads/{os.path.basename(link_or_file)}"
+        await download_url_file(link_or_file, filename, message)
     else:
-        file = message.text.split(None,1)[1]
-        filename = os.path.basename(urlparse(file).path) if not file.startswith("magnet:") else "magnet_download"
+        await sendMessage(message, "Unsupported input!")
+        return
 
-    # Download if direct/magnet/torrent
-    if not os.path.exists(file):
-        file, filename = await download_url_or_torrent(message, file)
+    await sendMessage(message, f"⬆️ Download complete: {os.path.basename(filename)}\n⏳ Starting Encoding…")
 
-    # Encoding
-    encoder = FFEncoder(message, file, filename, "1080")  # 1080p only
-    out_file = await encoder.start_encode()
-    await message.reply(f"✅ Encoding Completed: {out_file}")
+    # Start Encoding
+    encoder = FFEncoder(message, filename, os.path.basename(filename), "1080")
+    out_path = await encoder.start_encode()
+    if out_path:
+        await sendMessage(message, f"✅ Encoding complete: {os.path.basename(out_path)}")
 
-# ----------------------------
-# Run bot
-# ----------------------------
+# -------------------- RESTART COMMAND -------------------- #
+
+@bot.on_message(filters.command("restart") & filters.user(Var.OWNER_ID))
+async def restart_bot(client, message):
+    await sendMessage(message, "🔄 Restarting Bot…")
+    os.execv(__file__, ["python3"] + sys.argv)
+
+# -------------------- START BOT -------------------- #
+
 if __name__ == "__main__":
-    import asyncio
-    from pyrogram import idle
-
-    async def main():
-        await bot.start()
-        print("Bot started successfully...")
-        await idle()
-        await bot.stop()
-
-    asyncio.run(main())
+    os.makedirs("./downloads", exist_ok=True)
+    bot.run()
