@@ -1,77 +1,60 @@
 from pyrogram import Client, filters
-from asyncio import Queue, Lock, create_task, sleep, Event
-from os import path as ospath, remove, makedirs
-from time import time
-from math import floor
-from re import findall
+from asyncio import Queue, Lock, create_task, sleep
+from bot.core.ffencoder import FFEncoder
+from bot.core.func_utils import convertBytes, convertTime, editMessage
+from bot import Var, LOGS
+import os
+import sys
 
-from bot.core.ffencoder import FFEncoder, convertBytes, convertTime
-from bot.core.func_utils import editMessage
-from bot import Var
-
+# -------------------- Queue & Lock -------------------- #
 ffQueue = Queue()
 ffLock = Lock()
 ff_queued = {}
 runner_task = None
 
-# Ensure downloads/encode folders exist
-makedirs("downloads", exist_ok=True)
-makedirs("encode", exist_ok=True)
-
-# ------------------- DOWNLOAD FUNCTION ------------------- #
-async def download_file(message, file_path):
-    total_size = message.document.file_size if message.document else message.video.file_size
-    downloaded_size = 0
-    chunk_size = 256 * 1024  # 256KB per chunk
-
-    # create empty file
-    with open(file_path, "wb") as f:
-        pass
-
-    msg = await message.reply_text(f"⬇️ Downloading {os.path.basename(file_path)}…\n[▒▒▒▒▒▒▒▒▒▒▒▒] 0% | 0 KB/s | ETA: --:--")
-
+# -------------------- Download with Progress -------------------- #
+async def download_with_progress(msg, file_path, media_message):
     start_time = time()
-    last_update = 0
+    last_percent = -5
 
-    async for chunk in message.download(file_path, chunk_size=chunk_size, progress=None):
-        downloaded_size += len(chunk)
+    async def progress_callback(current, total):
+        nonlocal last_percent
         elapsed = time() - start_time
-        speed = downloaded_size / max(elapsed, 0.01)  # bytes/sec
-        percent = min(downloaded_size / total_size * 100, 100)
-        eta = (total_size - downloaded_size) / max(speed, 0.01)
+        speed = current / max(elapsed, 0.01)
+        percent = round(current / max(total, 1) * 100, 2)
+        eta = (total - current) / max(speed, 0.01)
+        bar = floor(percent/8)*"█" + (12 - floor(percent/8))*"▒"
 
-        bar_len = 12
-        filled_len = int(bar_len * percent // 100)
-        bar = "█" * filled_len + "▒" * (bar_len - filled_len)
-
-        # update every 3 sec
-        if int(elapsed) - last_update >= 3:
-            last_update = int(elapsed)
-            progress_str = f"""⬇️ Downloading {os.path.basename(file_path)}…
-[{bar}] {percent:.2f}% | {convertBytes(speed)}/s | ETA: {convertTime(eta)}"""
+        if percent - last_percent >= 5 or percent == 100:
+            progress_str = f"""<b>⬇️ Downloading :</b> <b>{os.path.basename(file_path)}</b>
+<code>[{bar}] {percent}%</code>
+Size: {convertBytes(current)} / {convertBytes(total)}
+Speed: {convertBytes(speed)}/s
+Time Left: {convertTime(eta)}"""
             await editMessage(msg, progress_str)
+            last_percent = percent
 
-    await editMessage(msg, f"✅ Download Completed: {os.path.basename(file_path)}")
-    return file_path, msg
+    await media_message.download(file_path, progress=progress_callback)
+    await editMessage(msg, f"⬇️ Download completed: {os.path.basename(file_path)}\n⏳ Starting encoding...")
 
-
-# ------------------- QUEUE RUNNER ------------------- #
+# -------------------- Queue Runner -------------------- #
 async def queue_runner(client):
     global runner_task
     while not ffQueue.empty():
         encoder = await ffQueue.get()
-        filename = ospath.basename(encoder.dl_path)
+        filename = os.path.basename(encoder.dl_path)
         ff_queued[filename] = encoder
         msg = encoder.msg
 
         try:
             # Download
-            await editMessage(msg, f"⬇️ Downloading {filename}…")
-            encoder.dl_path, _ = await download_file(encoder.message, encoder.dl_path)
+            await download_with_progress(msg, encoder.dl_path, encoder.message)
 
             # Encode
-            await editMessage(msg, f"⏳ Encoding {filename}…")
-            output_path = await encoder.start_encode()
+            encoder_task = create_task(encoder.start_encode())
+            while not encoder_task.done():
+                await sleep(8)
+            output_path = await encoder_task
 
             # Upload
             await client.send_document(
@@ -84,26 +67,24 @@ async def queue_runner(client):
             # Auto-delete
             if Var.AUTO_DEL:
                 for f in [encoder.dl_path, output_path]:
-                    if ospath.exists(f):
-                        remove(f)
+                    if os.path.exists(f):
+                        os.remove(f)
 
         except Exception as e:
+            LOGS.error(f"Queue task failed: {filename} | {str(e)}")
             await editMessage(msg, f"❌ Task failed: {filename}\nError: {str(e)}")
         finally:
             ff_queued.pop(filename, None)
             ffQueue.task_done()
-
     runner_task = None
 
-
-# ------------------- MANUAL ENCODE HANDLER ------------------- #
+# -------------------- Manual Encode -------------------- #
 @Client.on_message(filters.document | filters.video)
 async def manual_encode(client, message):
     global runner_task
 
-    if message.from_user.id not in Var.ADMINS:
-        await message.reply_text("❌ You are not allowed to use this bot.")
-        return
+    if message.from_user.id != int(Var.OWNER_ID):
+        return await message.reply_text("❌ Only owner can use this bot!")
 
     file_name = message.document.file_name if message.document else message.video.file_name
     download_path = f"downloads/{file_name}"
@@ -111,13 +92,14 @@ async def manual_encode(client, message):
 
     encoder = FFEncoder(message, download_path, file_name, "1080")
     encoder.msg = msg
+
     await ffQueue.put(encoder)
+    LOGS.info(f"Added {file_name} to queue")
 
     if runner_task is None or runner_task.done():
         runner_task = create_task(queue_runner(client))
 
-
-# ------------------- QUEUE STATUS ------------------- #
+# -------------------- Queue Status -------------------- #
 @Client.on_message(filters.command("queue"))
 async def queue_status(client, message):
     status_lines = []
@@ -127,7 +109,7 @@ async def queue_status(client, message):
 
     if not ffQueue.empty():
         for encoder in list(ffQueue._queue):
-            filename = ospath.basename(encoder.dl_path)
+            filename = os.path.basename(encoder.dl_path)
             status_lines.append(f"⏳ Waiting: {filename}")
 
     if not status_lines:
@@ -135,19 +117,16 @@ async def queue_status(client, message):
     else:
         await message.reply_text("\n".join(status_lines))
 
-
-# ------------------- CANCEL TASK ------------------- #
+# -------------------- Cancel Command -------------------- #
 @Client.on_message(filters.command("cancel"))
 async def cancel_encode(client, message):
     try:
         filename = message.text.split(maxsplit=1)[1]
     except IndexError:
-        await message.reply_text("⚠️ Usage: /cancel <filename>")
-        return
+        return await message.reply_text("⚠️ Usage: /cancel <filename>")
 
     removed = False
 
-    # Running task
     if filename in ff_queued:
         encoder = ff_queued[filename]
         encoder.is_cancelled = True
@@ -155,11 +134,10 @@ async def cancel_encode(client, message):
         await message.reply_text(f"🛑 Cancel request sent for {filename}")
         return
 
-    # Waiting queue
     temp_queue = []
     while not ffQueue.empty():
         encoder = await ffQueue.get()
-        if ospath.basename(encoder.dl_path) == filename:
+        if os.path.basename(encoder.dl_path) == filename:
             removed = True
             ffQueue.task_done()
         else:
@@ -174,12 +152,18 @@ async def cancel_encode(client, message):
     else:
         await message.reply_text(f"❌ File {filename} not found in queue.")
 
-
-# ------------------- RESTART BOT ------------------- #
+# -------------------- Restart Command -------------------- #
 @Client.on_message(filters.command("restart"))
 async def restart_bot(client, message):
-    if message.from_user.id not in Var.ADMINS:
-        await message.reply_text("❌ You are not allowed.")
-        return
-    await message.reply_text("🔄 Restarting bot...")
-    os.execv(sys.executable, ['python'] + sys.argv)
+    if message.from_user.id != int(Var.OWNER_ID):
+        return await message.reply_text("❌ Only owner can restart the bot!")
+
+    await message.reply_text("♻️ Restarting bot...")
+    # Gracefully stop ongoing tasks
+    for encoder in ff_queued.values():
+        encoder.is_cancelled = True
+    while not ffQueue.empty():
+        await ffQueue.get()
+        ffQueue.task_done()
+    await sleep(2)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
