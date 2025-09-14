@@ -65,7 +65,7 @@ async def manual_encode(client, message):
     msg = await message.reply_text(f"⏳ Queued: {file_name}")
 
     # FFEncoder: original message for download, bot reply for progress
-    encoder = FFEncoder(message, download_path, file_name, "720")
+    encoder = FFEncoder(message, download_path, file_name, "1080")
     encoder.msg = msg
 
     await ffQueue.put(encoder)
