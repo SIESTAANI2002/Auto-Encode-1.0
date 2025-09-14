@@ -9,7 +9,7 @@ from asyncio.subprocess import PIPE
 
 from bot import LOGS, ffpids_cache
 from bot.core.func_utils import mediainfo, convertBytes, convertTime, editMessage, sendMessage
-from bot.config import Var
+from bot import Var
 
 
 class ManualEncoder:
