@@ -8,9 +8,9 @@ from asyncio import sleep as asleep, gather, create_task, create_subprocess_shel
 from asyncio.subprocess import PIPE
 
 from bot import Var, ffpids_cache, LOGS
-from bot.modules.func_utils import mediainfo, convertBytes, convertTime, editMessage, sendMessage
-from bot.modules.reporter import rep
-from bot.modules.text_editor import TextEditor
+from bot.core.func_utils import mediainfo, convertBytes, convertTime, editMessage, sendMessage
+from bot.core.reporter import rep
+from bot.core.text_utils import TextEditor
 
 ffargs = {
     '1080': Var.FFCODE_1080,
