@@ -5,7 +5,7 @@ from aiofiles import open as aiopen
 from aiofiles.os import rename as aiorename, remove as aioremove
 from bot.core.ffencoder import FFEncoder
 from bot.core.func_utils import convertBytes, convertTime, editMessage, sendMessage
-from bot.config import Var
+from bot import Var
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
