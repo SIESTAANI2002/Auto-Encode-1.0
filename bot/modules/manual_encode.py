@@ -6,6 +6,7 @@ from os import remove, path as ospath
 from bot.core.func_utils import mediainfo, convertBytes, convertTime, editMessage, sendMessage
 import sys, time
 import asyncio
+from asyncio import sleep as asleep
 
 # -------------------- Queue & Lock -------------------- #
 runner_task = None
