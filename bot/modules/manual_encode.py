@@ -1,7 +1,7 @@
 from pyrogram import filters
 from asyncio import Queue, Lock, create_task, sleep
 from os import path as ospath, remove
-from bot import bot, Var, LOGS
+from bot import bot.config, Var, LOGS
 from bot.core.ffencoder import FFEncoder
 
 # -------------------- Queue & Lock -------------------- #
