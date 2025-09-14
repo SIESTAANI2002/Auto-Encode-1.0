@@ -108,4 +108,14 @@ async def manual_encode(_, message):
 # ----------------------------
 # Run bot
 # ----------------------------
-bot.run()
+if __name__ == "__main__":
+    import asyncio
+    from pyrogram import idle
+
+    async def main():
+        await bot.start()
+        print("Bot started successfully...")
+        await idle()
+        await bot.stop()
+
+    asyncio.run(main())
