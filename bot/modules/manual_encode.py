@@ -3,6 +3,7 @@ from asyncio import create_task
 from bot import bot, Var, ffQueue, ffLock, ff_queued, LOGS
 from bot.core.ffencoder import FFEncoder
 from os import remove, path as ospath
+from bot.core.func_utils import mediainfo, convertBytes, convertTime, editMessage, sendMessage
 import sys, time
 import asyncio
 
