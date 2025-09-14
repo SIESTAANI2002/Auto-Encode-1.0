@@ -30,6 +30,8 @@ async def queue_runner(client):
 ‣ {convert_bytes(speed)}/s
 ‣ Time Left: {convert_time(eta)}"""
                 await msg.edit(text)
+                # Inside download_progress (or wherever progress update occurs)
+                await asyncio.sleep(10)  # instead of updating constantly
 
             encoder.start_download = time.time()
             await encoder.message.download(encoder.dl_path, progress=download_progress)
