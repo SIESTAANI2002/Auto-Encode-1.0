@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from pyrogram import Client, filters
 from bot.core.ffencoder import FFEncoder
 from bot.core.func_utils import convertBytes, convertTime, editMessage
-from bot.config import Var
+from bot import Var
 
 bot = Client("manual_encode_bot", api_id=Var.API_ID, api_hash=Var.API_HASH, bot_token=Var.BOT_TOKEN)
 
