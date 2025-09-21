@@ -18,6 +18,7 @@ from .tguploader import TgUploader
 from .reporter import rep
 
 btn_formatter = {
+    '1080':'1080p',
     '720':'𝟳𝟮𝟬𝗽'
 }
 
