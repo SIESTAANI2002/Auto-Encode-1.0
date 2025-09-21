@@ -56,7 +56,6 @@ async def get_animes(name, torrent, force=False):
                 photo=await aniInfo.get_poster(),
                 caption=await aniInfo.get_caption()
             )
-            #post_msg = await sendMessage(Var.MAIN_CHANNEL, (await aniInfo.get_caption()).format(await aniInfo.get_poster()), invert_media=True)
             
             await asleep(1.5)
             stat_msg = await sendMessage(Var.MAIN_CHANNEL, f"‣ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>Downloading...</i>")
@@ -107,11 +106,16 @@ async def get_animes(name, torrent, force=False):
                 link = f"https://telegram.me/{(await bot.get_me()).username}?start={await encode('get-'+str(msg_id * abs(Var.FILE_STORE)))}"
                 
                 if post_msg:
-                    if len(btns) != 0 and len(btns[-1]) == 1:
-                        btns[-1].insert(1, InlineKeyboardButton(f"{btn_formatter[qual]} - {convertBytes(msg.document.file_size)}", url=link))
+                    # FIXED: correctly add multiple buttons without replacing
+                    existing_kb = post_msg.reply_markup.inline_keyboard if post_msg.reply_markup else []
+                    new_btn = InlineKeyboardButton(f"{btn_formatter.get(qual, qual)} - {convertBytes(msg.document.file_size)}", url=link)
+                    
+                    if existing_kb and len(existing_kb[-1]) == 1:
+                        existing_kb[-1].append(new_btn)
                     else:
-                        btns.append([InlineKeyboardButton(f"{btn_formatter[qual]} - {convertBytes(msg.document.file_size)}", url=link)])
-                    await editMessage(post_msg, post_msg.caption.html if post_msg.caption else "", InlineKeyboardMarkup(btns))
+                        existing_kb.append([new_btn])
+                    
+                    await editMessage(post_msg, post_msg.caption.html if post_msg.caption else "", InlineKeyboardMarkup(existing_kb))
                     
                 await db.saveAnime(ani_id, ep_no, qual, post_id)
                 bot_loop.create_task(extra_utils(msg_id, out_path))
