@@ -15,11 +15,12 @@ CAPTION_FORMAT = """
 <b>╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅</b>
 <b>⊙ <i>Genres:</i></b> <i>{genres}</i>
 <b>⊙ <i>Status:</i></b> <i>RELEASING</i> 
-<b>⊙ <i>Source:</i></b> <i>Subsplease</i>
+<b>⊙ <i>Source:</i></b> <i>AnimeToki</i>
 <b>⊙ <i>Episode:</i></b> <i>{ep_no}</i>
 <b>⊙ <i>Audio: Japanese</i></b>
 <b>⊙ <i>Subtitle: English</i></b>
-<b>⊙ <i>Resolution: 720p</i></b>
+<b>⊙ <i>Codec: HEVC | AAC</i></b>
+<b>⊙ <i>Resolution: 1080p | 480p</i></b>
 <b>╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅</b>
 <blockquote>╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅
 ⌬  <b><i>For More</i></b> ~ </i></b><b><i>AnimeToki.com</i></b>
