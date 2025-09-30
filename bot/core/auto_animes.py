@@ -1,7 +1,6 @@
 # bot/core/auto_animes.py
 import asyncio
 from asyncio import Event
-from asyncio.subprocess import PIPE
 from os import path as ospath
 from aiofiles.os import remove as aioremove
 from traceback import format_exc
@@ -18,7 +17,7 @@ from .reporter import rep
 
 btn_formatter = {
     '1080': '1080p',
-    '720': '𝟳𝟮𝟬𝗽'
+    '480': '48𝟬𝗽'
 }
 
 async def fetch_animes():
@@ -44,7 +43,6 @@ async def get_animes(name, torrent, force=False):
         if not force and ani_id in ani_cache.get('completed', set()):
             return
 
-        # Check DB if quality already uploaded
         ani_data = await db.getAnime(ani_id)
         qual_data = ani_data.get(ep_no) if ani_data else None
         if not force and qual_data and all(qual_data.get(q) for q in Var.QUALS):
@@ -56,7 +54,6 @@ async def get_animes(name, torrent, force=False):
 
         await rep.report(f"New Anime Torrent Found!\n\n{name}", "info")
 
-        # Post photo/caption
         post_msg = await bot.send_photo(
             Var.MAIN_CHANNEL,
             photo=await aniInfo.get_poster(),
@@ -64,10 +61,22 @@ async def get_animes(name, torrent, force=False):
         )
 
         await asyncio.sleep(1.5)
-        stat_msg = await sendMessage(Var.MAIN_CHANNEL, f"‣ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>Downloading...</i>")
-        dl = await TorDownloader("./downloads").download(torrent, name)
+        stat_msg = await sendMessage(
+            Var.MAIN_CHANNEL,
+            f"‣ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>Downloading...</i>"
+        )
+
+        # Retry download up to 3 times if incomplete
+        dl = None
+        for attempt in range(3):
+            dl = await TorDownloader("./downloads").download(torrent, name)
+            if dl and ospath.exists(dl):
+                break
+            await rep.report(f"Download failed or incomplete. Retrying ({attempt+1}/3)...", "warning")
+            await asyncio.sleep(5)
+
         if not dl or not ospath.exists(dl):
-            await rep.report(f"File Download Incomplete, Try Again", "error")
+            await rep.report(f"File Download Incomplete after 3 retries, Skipping", "error")
             await stat_msg.delete()
             return
 
@@ -87,7 +96,7 @@ async def get_animes(name, torrent, force=False):
             filename = await aniInfo.get_upname(qual)
             await editMessage(stat_msg, f"‣ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>Ready to Encode...</i>")
             await asyncio.sleep(1.5)
-            await rep.report("Starting Encode...", "info")
+            await rep.report(f"Starting Encode ({qual})...", "info")
 
             try:
                 out_path = await FFEncoder(stat_msg, dl, filename, qual).start_encode()
@@ -97,7 +106,7 @@ async def get_animes(name, torrent, force=False):
                 ffLock.release()
                 return
 
-            await rep.report("Successfully Compressed. Now Going To Upload...", "info")
+            await rep.report(f"✅ Successfully Compressed ({qual}). Uploading...", "info")
             await editMessage(stat_msg, f"‣ <b>Anime Name :</b> <b><i>{filename}</i></b>\n\n<i>Ready to Upload...</i>")
             await asyncio.sleep(1.5)
 
@@ -109,25 +118,39 @@ async def get_animes(name, torrent, force=False):
                 ffLock.release()
                 return
 
-            await rep.report("Successfully Uploaded File into Tg...", "info")
+            await rep.report(f"✅ Successfully Uploaded {qual} File to Tg...", "info")
             msg_id = msg.id
             link = f"https://telegram.me/{(await bot.get_me()).username}?start={await encode('get-'+str(msg_id * abs(Var.FILE_STORE)))}"
 
+            # Telegram buttons
             if post_msg:
-                btn_label = btn_formatter.get(qual, qual)  # Fixed KeyError
-                new_btn = InlineKeyboardButton(f"{btn_label} - {convertBytes(msg.document.file_size)}", url=link)
+                btn_label = btn_formatter.get(qual, qual)
+                new_btn = InlineKeyboardButton(
+                    f"{btn_label} - {convertBytes(msg.document.file_size)}",
+                    url=link
+                )
                 if len(btns) != 0 and len(btns[-1]) == 1:
                     btns[-1].append(new_btn)
                 else:
                     btns.append([new_btn])
-                await editMessage(post_msg, post_msg.caption.html if post_msg.caption else "", InlineKeyboardMarkup(btns))
+                await editMessage(
+                    post_msg,
+                    post_msg.caption.html if post_msg.caption else "",
+                    InlineKeyboardMarkup(btns)
+                )
 
+            # Save in DB
             await db.saveAnime(ani_id, ep_no, qual, post_id)
+
+            # Extra utils (backup etc.)
             bot_loop.create_task(extra_utils(msg_id, out_path))
 
         ffLock.release()
         await stat_msg.delete()
+
+        # Cleanup original file after all qualities
         await aioremove(dl)
+
         ani_cache.setdefault('completed', set()).add(ani_id)
 
     except Exception:
